@@ -2,8 +2,8 @@
 
 import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
-import { Plus, AlertTriangle, XCircle, AlertCircle } from "lucide-react"
-import { createClient } from "@/lib/supabase/client"
+import { Plus, AlertTriangle, XCircle, AlertCircle, Trash2 } from "lucide-react"
+import { ViolationModal } from "./violation-modal"
 
 interface Violation {
   id: string
@@ -29,48 +29,94 @@ export function ViolationLogs() {
   const [filterSeverity, setFilterSeverity] = useState<"all" | "low" | "medium" | "high">("all")
   const [violations, setViolations] = useState<Violation[]>([])
   const [isLoading, setIsLoading] = useState(true)
-  const [memberMap, setMemberMap] = useState<Map<string, string>>(new Map())
+  const [error, setError] = useState("")
+
+  const fetchViolations = async () => {
+    try {
+      setIsLoading(true)
+      const [violationsRes, membersRes] = await Promise.all([fetch("/api/violations"), fetch("/api/members")])
+
+      if (!violationsRes.ok || !membersRes.ok) {
+        throw new Error("Failed to fetch data")
+      }
+
+      const violationsData = await violationsRes.json()
+      const membersData = await membersRes.json()
+
+      const memberMap = new Map<string, string>()
+      membersData?.forEach((m: MemberData) => {
+        memberMap.set(m.id, m.nickname)
+      })
+
+      const violationsWithNicknames =
+        violationsData?.map((v: any) => ({
+          ...v,
+          nickname: memberMap.get(v.member_id) || "Unknown",
+        })) || []
+
+      setViolations(violationsWithNicknames)
+      setError("")
+    } catch (err) {
+      console.error("[v0] Error fetching violations:", err)
+      setError("Failed to load violations")
+    } finally {
+      setIsLoading(false)
+    }
+  }
 
   useEffect(() => {
-    const fetchViolations = async () => {
-      try {
-        const supabase = createClient()
-
-        // Fetch members first to map IDs to nicknames
-        const { data: membersData } = await supabase.from("members").select("id, nickname")
-        const map = new Map<string, string>()
-        membersData?.forEach((m: MemberData) => {
-          map.set(m.id, m.nickname)
-        })
-        setMemberMap(map)
-
-        const { data, error } = await supabase
-          .from("violations")
-          .select("*")
-          .order("violation_date", { ascending: false })
-
-        if (error) {
-          console.error("[v0] Error fetching violations:", error)
-          return
-        }
-
-        // Add member nicknames to violations
-        const violationsWithNicknames =
-          data?.map((v: any) => ({
-            ...v,
-            nickname: map.get(v.member_id) || "Unknown",
-          })) || []
-
-        setViolations(violationsWithNicknames)
-      } catch (err) {
-        console.error("[v0] Unexpected error:", err)
-      } finally {
-        setIsLoading(false)
-      }
-    }
-
     fetchViolations()
   }, [])
+
+  const handleLogViolation = async (formData: {
+    member_id: string
+    violation_type: "template" | "custom"
+    violation_name: string
+    custom_violation_name?: string
+    description: string
+    severity: "low" | "medium" | "high"
+  }) => {
+    try {
+      const response = await fetch("/api/violations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(formData),
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || "Failed to log violation")
+      }
+
+      await fetchViolations()
+    } catch (err) {
+      throw err
+    }
+  }
+
+  const handleDeleteViolation = async (id: string) => {
+    if (!confirm("Are you sure you want to delete this violation record?")) return
+
+    try {
+      setError("")
+      const response = await fetch(`/api/violations/${id}`, { method: "DELETE" })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || "Failed to delete violation")
+      }
+
+      setViolations((prev) => prev.filter((v) => v.id !== id))
+
+      await fetchViolations()
+    } catch (err) {
+      console.error("[v0] Error deleting violation:", err)
+      const errorMessage = err instanceof Error ? err.message : "Failed to delete violation"
+      setError(errorMessage)
+
+      await fetchViolations()
+    }
+  }
 
   const filteredViolations = violations.filter((v) => filterSeverity === "all" || v.severity === filterSeverity)
 
@@ -134,6 +180,14 @@ export function ViolationLogs() {
         ))}
       </div>
 
+      {/* Error Message */}
+      {error && (
+        <div className="rounded-lg bg-red-500/20 border border-red-500/50 p-4 flex gap-3">
+          <AlertCircle className="h-5 w-5 text-red-400 flex-shrink-0 mt-0.5" />
+          <p className="text-sm text-red-300">{error}</p>
+        </div>
+      )}
+
       {/* Violations List */}
       {isLoading ? (
         <div className="text-center py-12">
@@ -144,33 +198,44 @@ export function ViolationLogs() {
           {filteredViolations.map((violation) => (
             <div
               key={violation.id}
-              className={`rounded-xl border p-5 transition-all ${getSeverityColor(violation.severity)} flex items-start gap-4`}
+              className={`rounded-xl border p-5 transition-all ${getSeverityColor(violation.severity)} flex items-start gap-4 justify-between`}
             >
-              <div className="flex-shrink-0 mt-1">{getSeverityIcon(violation.severity)}</div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-3 flex-wrap mb-2">
-                  <h4 className="font-bold text-white">{violation.nickname}</h4>
-                  <span className="text-xs px-2 py-1 rounded-full bg-slate-700/50 text-slate-300">
-                    {violation.violation_type === "template" ? "Template" : "Custom"}
-                  </span>
+              <div className="flex items-start gap-4 flex-1 min-w-0">
+                <div className="flex-shrink-0 mt-1">{getSeverityIcon(violation.severity)}</div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-3 flex-wrap mb-2">
+                    <h4 className="font-bold text-white">{violation.nickname}</h4>
+                    <span className="text-xs px-2 py-1 rounded-full bg-slate-700/50 text-slate-300">
+                      {violation.violation_type === "template" ? "Template" : "Custom"}
+                    </span>
+                  </div>
+                  <p className="text-sm font-semibold text-slate-200 mb-1">{violation.violation_name}</p>
+                  <p className="text-sm text-slate-400">{violation.description}</p>
+                  <p className="text-xs text-slate-500 mt-2">
+                    {new Date(violation.violation_date).toLocaleDateString("id-ID")}
+                  </p>
                 </div>
-                <p className="text-sm font-semibold text-slate-200 mb-1">{violation.violation_name}</p>
-                <p className="text-sm text-slate-400">{violation.description}</p>
-                <p className="text-xs text-slate-500 mt-2">
-                  {new Date(violation.violation_date).toLocaleDateString("id-ID")}
-                </p>
               </div>
-              <span
-                className={`text-xs font-bold px-3 py-1 rounded-lg flex-shrink-0 uppercase tracking-wide ${
-                  violation.severity === "high"
-                    ? "bg-red-500/20 text-red-300"
-                    : violation.severity === "medium"
-                      ? "bg-yellow-500/20 text-yellow-300"
-                      : "bg-blue-500/20 text-blue-300"
-                }`}
-              >
-                {violation.severity}
-              </span>
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <span
+                  className={`text-xs font-bold px-3 py-1 rounded-lg uppercase tracking-wide ${
+                    violation.severity === "high"
+                      ? "bg-red-500/20 text-red-300"
+                      : violation.severity === "medium"
+                        ? "bg-yellow-500/20 text-yellow-300"
+                        : "bg-blue-500/20 text-blue-300"
+                  }`}
+                >
+                  {violation.severity}
+                </span>
+                <button
+                  onClick={() => handleDeleteViolation(violation.id)}
+                  className="p-2 rounded-lg hover:bg-red-500/20 text-red-400 transition-colors"
+                  title="Delete violation"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </div>
             </div>
           ))}
         </div>
@@ -181,6 +246,9 @@ export function ViolationLogs() {
           <p className="text-slate-400">No violations found.</p>
         </div>
       )}
+
+      {/* Modal for Logging Violations */}
+      <ViolationModal isOpen={showForm} onClose={() => setShowForm(false)} onSubmit={handleLogViolation} />
     </div>
   )
 }

@@ -2,8 +2,8 @@
 
 import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
-import { Plus, Search, MessageCircle, Gamepad2 } from "lucide-react"
-import { createClient } from "@/lib/supabase/client"
+import { Plus, Search, MessageCircle, Gamepad2, Edit2, Trash2, AlertCircle } from "lucide-react"
+import { AddMemberModal } from "./add-member-modal"
 
 interface Member {
   id: string
@@ -18,28 +18,97 @@ export function MemberLogs() {
   const [searchTerm, setSearchTerm] = useState("")
   const [members, setMembers] = useState<Member[]>([])
   const [isLoading, setIsLoading] = useState(true)
+  const [showAddModal, setShowAddModal] = useState(false)
+  const [editingMember, setEditingMember] = useState<Member | null>(null)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [error, setError] = useState("")
+
+  const fetchMembers = async () => {
+    try {
+      setIsLoading(true)
+      const response = await fetch("/api/members")
+      if (!response.ok) throw new Error("Failed to fetch members")
+      const data = await response.json()
+      setMembers(data || [])
+    } catch (err) {
+      console.error("[v0] Error fetching members:", err)
+      setError("Failed to load members")
+    } finally {
+      setIsLoading(false)
+    }
+  }
 
   useEffect(() => {
-    const fetchMembers = async () => {
-      try {
-        const supabase = createClient()
-        const { data, error } = await supabase.from("members").select("*").order("join_date", { ascending: false })
-
-        if (error) {
-          console.error("[v0] Error fetching members:", error)
-          return
-        }
-
-        setMembers(data || [])
-      } catch (err) {
-        console.error("[v0] Unexpected error:", err)
-      } finally {
-        setIsLoading(false)
-      }
-    }
-
     fetchMembers()
   }, [])
+
+  const handleAddMember = async (formData: {
+    nickname: string
+    discord_username: string
+    roblox_username: string
+    join_date: string
+  }) => {
+    setIsSubmitting(true)
+    try {
+      const response = await fetch("/api/members", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(formData),
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || "Failed to add member")
+      }
+
+      await fetchMembers()
+      setError("")
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  const handleUpdateMember = async (formData: {
+    nickname: string
+    discord_username: string
+    roblox_username: string
+    join_date: string
+  }) => {
+    if (!editingMember) return
+
+    setIsSubmitting(true)
+    try {
+      const response = await fetch(`/api/members/${editingMember.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(formData),
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || "Failed to update member")
+      }
+
+      await fetchMembers()
+      setEditingMember(null)
+      setError("")
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  const handleDeleteMember = async (id: string) => {
+    if (!confirm("Are you sure you want to delete this member?")) return
+
+    try {
+      const response = await fetch(`/api/members/${id}`, { method: "DELETE" })
+      if (!response.ok) throw new Error("Failed to delete member")
+      await fetchMembers()
+    } catch (err) {
+      console.error("[v0] Error deleting member:", err)
+      setError("Failed to delete member")
+    }
+  }
 
   const filteredMembers = members.filter(
     (member) =>
@@ -58,7 +127,13 @@ export function MemberLogs() {
           <h2 className="text-3xl font-bold text-white">Member Logs</h2>
           <p className="text-slate-400 mt-1">{activeCount} active members</p>
         </div>
-        <Button className="gap-2 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-600 hover:to-blue-700 text-white border-0 shadow-lg">
+        <Button
+          onClick={() => {
+            setEditingMember(null)
+            setShowAddModal(true)
+          }}
+          className="gap-2 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-600 hover:to-blue-700 text-white border-0 shadow-lg"
+        >
           <Plus className="h-4 w-4" />
           Add Member
         </Button>
@@ -75,6 +150,14 @@ export function MemberLogs() {
           className="w-full rounded-xl border border-slate-700 bg-slate-800/50 backdrop-blur-sm px-4 py-3 pl-12 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-transparent transition-all"
         />
       </div>
+
+      {/* Error Message */}
+      {error && (
+        <div className="rounded-lg bg-red-500/20 border border-red-500/50 p-4 flex gap-3">
+          <AlertCircle className="h-5 w-5 text-red-400 flex-shrink-0 mt-0.5" />
+          <p className="text-sm text-red-300">{error}</p>
+        </div>
+      )}
 
       {/* Members Grid */}
       {isLoading ? (
@@ -106,7 +189,6 @@ export function MemberLogs() {
 
               {/* Platform Accounts */}
               <div className="space-y-3">
-                {/* Discord */}
                 <div className="flex items-center gap-3 text-slate-300">
                   <MessageCircle className="h-4 w-4 text-indigo-400" />
                   <div className="flex-1 min-w-0">
@@ -115,7 +197,6 @@ export function MemberLogs() {
                   </div>
                 </div>
 
-                {/* Roblox */}
                 <div className="flex items-center gap-3 text-slate-300">
                   <Gamepad2 className="h-4 w-4 text-red-400" />
                   <div className="flex-1 min-w-0">
@@ -137,10 +218,26 @@ export function MemberLogs() {
                 </p>
               </div>
 
-              {/* Action Button */}
-              <button className="mt-4 w-full rounded-lg bg-slate-700/30 hover:bg-cyan-500/20 text-cyan-400 text-sm font-medium py-2 transition-colors border border-slate-700 hover:border-cyan-500/50">
-                View Profile
-              </button>
+              {/* Action Buttons for Edit and Delete */}
+              <div className="mt-4 flex gap-2">
+                <button
+                  onClick={() => {
+                    setEditingMember(member)
+                    setShowAddModal(true)
+                  }}
+                  className="flex-1 rounded-lg bg-slate-700/30 hover:bg-cyan-500/20 text-cyan-400 text-sm font-medium py-2 transition-colors border border-slate-700 hover:border-cyan-500/50 flex items-center justify-center gap-2"
+                >
+                  <Edit2 className="h-4 w-4" />
+                  Edit
+                </button>
+                <button
+                  onClick={() => handleDeleteMember(member.id)}
+                  className="flex-1 rounded-lg bg-slate-700/30 hover:bg-red-500/20 text-red-400 text-sm font-medium py-2 transition-colors border border-slate-700 hover:border-red-500/50 flex items-center justify-center gap-2"
+                >
+                  <Trash2 className="h-4 w-4" />
+                  Delete
+                </button>
+              </div>
             </div>
           ))}
         </div>
@@ -151,6 +248,17 @@ export function MemberLogs() {
           <p className="text-slate-400">No members found matching your search.</p>
         </div>
       )}
+
+      {/* Modal for Adding/Editing Members */}
+      <AddMemberModal
+        isOpen={showAddModal}
+        onClose={() => {
+          setShowAddModal(false)
+          setEditingMember(null)
+        }}
+        onSubmit={editingMember ? handleUpdateMember : handleAddMember}
+        member={editingMember}
+      />
     </div>
   )
 }

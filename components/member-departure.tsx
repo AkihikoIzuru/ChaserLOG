@@ -2,8 +2,8 @@
 
 import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
-import { Plus, LogOut, Calendar } from "lucide-react"
-import { createClient } from "@/lib/supabase/client"
+import { Plus, LogOut, Calendar, AlertCircle } from "lucide-react"
+import { DepartureModal } from "./departure-modal"
 
 interface DepartureMember {
   id: string
@@ -26,50 +26,71 @@ export function MemberDeparture() {
   const [sortBy, setSortBy] = useState<"recent" | "oldest">("recent")
   const [departures, setDepartures] = useState<DepartureMember[]>([])
   const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState("")
+
+  const fetchDepartures = async () => {
+    try {
+      setIsLoading(true)
+      const [departuresRes, membersRes] = await Promise.all([fetch("/api/departures"), fetch("/api/members")])
+
+      if (!departuresRes.ok || !membersRes.ok) {
+        throw new Error("Failed to fetch data")
+      }
+
+      const departuresData = await departuresRes.json()
+      const membersData = await membersRes.json()
+
+      const memberMap = new Map<string, { nickname: string; join_date: string }>()
+      membersData?.forEach((m: MemberData) => {
+        memberMap.set(m.id, { nickname: m.nickname, join_date: m.join_date })
+      })
+
+      const enrichedDepartures =
+        departuresData?.map((d: any) => {
+          const memberInfo = memberMap.get(d.member_id)
+          return {
+            ...d,
+            nickname: memberInfo?.nickname || "Unknown",
+            join_date: memberInfo?.join_date || d.departed_at,
+          }
+        }) || []
+
+      setDepartures(enrichedDepartures)
+      setError("")
+    } catch (err) {
+      console.error("[v0] Error fetching departures:", err)
+      setError("Failed to load departures")
+    } finally {
+      setIsLoading(false)
+    }
+  }
 
   useEffect(() => {
-    const fetchDepartures = async () => {
-      try {
-        const supabase = createClient()
-
-        // Fetch members to get join dates
-        const { data: membersData } = await supabase.from("members").select("id, nickname, join_date")
-        const memberMap = new Map<string, { nickname: string; join_date: string }>()
-        membersData?.forEach((m: MemberData) => {
-          memberMap.set(m.id, { nickname: m.nickname, join_date: m.join_date })
-        })
-
-        const { data, error } = await supabase
-          .from("member_departures")
-          .select("*")
-          .order("departed_at", { ascending: false })
-
-        if (error) {
-          console.error("[v0] Error fetching departures:", error)
-          return
-        }
-
-        // Enrich departure data with member info
-        const enrichedDepartures =
-          data?.map((d: any) => {
-            const memberInfo = memberMap.get(d.member_id)
-            return {
-              ...d,
-              nickname: memberInfo?.nickname || "Unknown",
-              join_date: memberInfo?.join_date || d.departed_at,
-            }
-          }) || []
-
-        setDepartures(enrichedDepartures)
-      } catch (err) {
-        console.error("[v0] Unexpected error:", err)
-      } finally {
-        setIsLoading(false)
-      }
-    }
-
     fetchDepartures()
   }, [])
+
+  const handleLogDeparture = async (formData: {
+    member_id: string
+    departure_reason: string
+    departed_at: string
+  }) => {
+    try {
+      const response = await fetch("/api/departures", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(formData),
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || "Failed to log departure")
+      }
+
+      await fetchDepartures()
+    } catch (err) {
+      throw err
+    }
+  }
 
   const sortedDepartures = [...departures].sort((a, b) => {
     const dateA = new Date(a.departed_at).getTime()
@@ -118,6 +139,14 @@ export function MemberDeparture() {
           </button>
         ))}
       </div>
+
+      {/* Error Message */}
+      {error && (
+        <div className="rounded-lg bg-red-500/20 border border-red-500/50 p-4 flex gap-3">
+          <AlertCircle className="h-5 w-5 text-red-400 flex-shrink-0 mt-0.5" />
+          <p className="text-sm text-red-300">{error}</p>
+        </div>
+      )}
 
       {/* Departures Grid */}
       {isLoading ? (
@@ -182,6 +211,9 @@ export function MemberDeparture() {
           <p className="text-slate-400">No member departures recorded yet.</p>
         </div>
       )}
+
+      {/* Modal for Logging Departures */}
+      <DepartureModal isOpen={showForm} onClose={() => setShowForm(false)} onSubmit={handleLogDeparture} />
     </div>
   )
 }
