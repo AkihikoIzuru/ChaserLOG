@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
-import { Plus, Search, MessageCircle, Gamepad2, Edit2, Trash2, AlertCircle } from "lucide-react"
+import { Plus, Search, MessageCircle, Gamepad2, Edit2, Trash2, AlertCircle, CheckCircle2, Circle } from "lucide-react"
 import { AddMemberModal } from "./add-member-modal"
 
 interface Member {
@@ -22,6 +22,7 @@ export function MemberLogs() {
   const [editingMember, setEditingMember] = useState<Member | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState("")
+  const [togglingId, setTogglingId] = useState<string | null>(null)
 
   const fetchMembers = async () => {
     try {
@@ -107,6 +108,30 @@ export function MemberLogs() {
     } catch (err) {
       console.error("[v0] Error deleting member:", err)
       setError("Failed to delete member")
+    }
+  }
+
+  const handleToggleStatus = async (member: Member) => {
+    setTogglingId(member.id)
+    try {
+      const newStatus = member.status === "active" ? "inactive" : "active"
+      const response = await fetch(`/api/members/${member.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: newStatus }),
+      })
+
+      if (!response.ok) {
+        throw new Error("Failed to update member status")
+      }
+
+      // Update local state for immediate UI feedback
+      setMembers(members.map((m) => (m.id === member.id ? { ...m, status: newStatus } : m)))
+    } catch (err) {
+      console.error("[v0] Error toggling status:", err)
+      setError("Failed to update member status")
+    } finally {
+      setTogglingId(null)
     }
   }
 
@@ -218,8 +243,32 @@ export function MemberLogs() {
                 </p>
               </div>
 
-              {/* Action Buttons for Edit and Delete */}
+              {/* Action Buttons */}
               <div className="mt-4 flex gap-2">
+                <button
+                  onClick={() => handleToggleStatus(member)}
+                  disabled={togglingId === member.id}
+                  className={`flex-1 rounded-lg text-sm font-medium py-2 transition-colors border flex items-center justify-center gap-2 ${
+                    member.status === "active"
+                      ? "bg-slate-700/30 hover:bg-slate-600/50 text-slate-300 border-slate-700 hover:border-slate-600"
+                      : "bg-green-500/20 hover:bg-green-500/30 text-green-400 border-green-500/30 hover:border-green-500/50"
+                  } disabled:opacity-50 disabled:cursor-not-allowed`}
+                >
+                  {togglingId === member.id ? (
+                    <Circle className="h-4 w-4 animate-spin" />
+                  ) : member.status === "active" ? (
+                    <>
+                      <CheckCircle2 className="h-4 w-4" />
+                      Active
+                    </>
+                  ) : (
+                    <>
+                      <Circle className="h-4 w-4" />
+                      Inactive
+                    </>
+                  )}
+                </button>
+
                 <button
                   onClick={() => {
                     setEditingMember(member)
