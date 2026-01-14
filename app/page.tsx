@@ -2,6 +2,7 @@ import { MemberLogs } from "@/components/member-logs"
 import { ViolationLogs } from "@/components/violation-logs"
 import { MemberDeparture } from "@/components/member-departure"
 import { Users } from "lucide-react"
+import { MemberStats } from "@/components/member-stats"
 
 export default function Home() {
   return (
@@ -22,6 +23,10 @@ export default function Home() {
       {/* Main Content */}
       <main className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8">
         <div className="space-y-12">
+          <section className="space-y-4">
+            <MemberStats />
+          </section>
+
           {/* Member Logs Section */}
           <section className="space-y-4">
             <MemberLogs />
